@@ -1949,7 +1949,7 @@ int main()
 
 The array of integers on the heap to which `pInt` is pointing has a size of `10 * sizeof(int)`, which is 40 bytes. Let us now use Valgrind to search for this leak.
 
-After compiling the `memory_leaks_debugging.cpp` code file on the right to `a.out`, the terminal can be used to start Valgrind with the following command:
+After compiling the `memory_leaks_debugging.cpp` code file on the above to `a.out`, the terminal can be used to start Valgrind with the following command:
 
 ```bash
 valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --log-file=valgrind-out.txt a.out
@@ -1997,3 +1997,771 @@ This short introduction into memory leak search is only an example of how powerf
 #### Summary
 
 **Prior to C++11**, the language had gained a **negative reputation, particularly regarding memory management issues,** making it challenging for beginners to navigate through its complex rules and best practices. **However, C++11 marked a significant turning point in the language's evolution** by introducing revolutionary concepts **like move semantics and smart pointers**. These modern features have not only modernized C++ but also made it significantly less prone to memory-related errors. **When used correctly, modern C++ largely eliminates many of the traditional memory management problems** that plagued earlier versions of the language, making it more accessible and safer for developers of all skill levels.
+
+
+
+## 4.Resource Copying Policies
+
+### Copy Semantics
+
+The section discusses copy semantics in C++, using an example of **a class with two members: a stack-based integer and a heap-based character pointer**. **When creating a copy of an object using the default assignment operator, all member variables are duplicated**, but **for pointer members**, this creates a **shallow copy** where both the original and copied pointers **reference the same memory location on the heap** for different instances. This **can lead to unintended behavior when one instance modifies the shared memory, affecting both objects**. To control this behavior, developers can implement their own copying policy by **overloading the copy constructor and assignment operator** to perform a **deep copy**, where the **heap memory is also duplicated**, ensuring each instance has its own independent copy of the data.
+
+
+
+#### Policy 0: Default copying
+
+Resource management is one of the primary responsibilities of a C++ programmer. Among resources such as multi-threaded locks, files, network and database connections this also includes memory. The common denominator in all of these examples is that access to the resource is often managed through a handle such as a pointer. Also, after the resource has been used and is no longer, it must be released again so that it available for re-use by someone else.
+
+In C++, a common way of safely accessing resources is by **wrapping a manager class around the handle**, which is initialized when the **resource is acquired (in the class constructor)** and **released when it is deleted (in the class destructor).** This concept is often referred to as ***Resource Acquisition is Initialization (RAII)***, which we will discuss in greater depth in the next concept. **One problem with this approach** though is that **copying the manager object will also copy the handle** of the resource. This allows **two objects access to the same resource** - and this can mean trouble.
+
+Consider the example on the below of managing access to a block of heap memory.
+
+```cpp
+#include <iostream>
+
+class MyClass {
+ private:
+  int *_myInt;
+
+ public:
+  MyClass() { _myInt = (int *)malloc(sizeof(int)); };
+  ~MyClass() { free(_myInt); };
+  void printOwnAddress() {
+    std::cout << "Own address on the stack is " << this << std::endl;
+  }
+  void printMemberAddress() {
+    std::cout << "Managing memory block on the heap at " << _myInt << std::endl;
+  }
+};
+
+int main() {
+  // instantiate object 1
+  MyClass myClass1;
+  myClass1.printOwnAddress();
+  myClass1.printMemberAddress();
+
+  // copy object 1 into object 2
+  MyClass myClass2(myClass1);  // copy constructor
+  myClass2.printOwnAddress();
+  myClass2.printMemberAddress();
+
+  return 0;
+}
+```
+
+The class `MyClass` has a private member, which is a pointer to a heap-allocated integer. Allocation is performed in the constructor, deallocation is done in the destructor. This means that the memory block of size `sizeof(int)` is allocated when the objects `myClass1` and `myClass2` are created on the stack and deallocated when their scope is left, which happens at the end of the main. The difference between `myClass1` and **`myClass2` is that the latter is instantiated using the copy constructor**, which **duplicates the members in `myClass1` - including the pointer to the heap memory where `_myInt` resides.**
+
+The output of the program looks like the following:
+
+```
+Own address on the stack is 0x7fff30086a88
+Managing memory block on the heap at 0x560f504132b0
+Own address on the stack is 0x7fff30086a90
+Managing memory block on the heap at 0x560f504132b0
+free(): double free detected in tcache 2
+Aborted (core dumped)
+```
+
+From the output we can see that the **stack address is different for `myClass1` and `myClass2` - as was expected**. The address of the managed **memory block on the heap however is identical**. This means that when the **first object goes out of scope**, it releases the memory resource by calling `free` in its destructor. **The second object does the same** - which causes the program to crash as the pointer is now referencing an invalid area of memory, which **has already been freed.**
+
+##### Shallow Copy
+
+The default behavior of both copy constructor and assignment operator is to perform a ***shallow copy*** as with the example above. The following figure illustrates the concept:
+
+<img src="assets/C41-FIG1.png" style="zoom:50%;" />
+
+Fortunately, **in C++, the copying process can be controlled** by **defining a tailored copy constructor** as well as a **copy assignment operator**. The copying process must be closely linked to the respective resource release mechanism and is often referred to as ***copy-ownership policy***. **Tailoring the copy constructor according to your memory management policy is an important choice you often need to make when designing a class**. In the following, we will closely examine several well-known copy-ownership policies.
+
+#### Policy 1: No copying policy
+
+**The simplest policy of all is to forbid copying** and assigning class instances all together. This can be achieved by declaring, but not defining a private copy constructor and assignment operator (see `NoCopyClass1` below) or alternatively by making both public and assigning the `delete` operator (see `NoCopyClass2` below). **The second choice is more explicit and makes it clearer to the programmer that copying has been actively forbidden**. Let us have a look at a code example on the below that illustrates both cases.
+
+```cpp
+class NoCopyClass1
+{
+private:
+    NoCopyClass1(const NoCopyClass1 &);
+    NoCopyClass1 &operator=(const NoCopyClass1 &);
+
+public:
+    NoCopyClass1(){};
+};
+
+class NoCopyClass2
+{
+public:
+    NoCopyClass2(){}
+    NoCopyClass2(const NoCopyClass2 &) = delete;
+    NoCopyClass2 &operator=(const NoCopyClass2 &) = delete;
+};
+
+int main()
+{
+    NoCopyClass1 original1;
+    NoCopyClass1 copy1a(original1); // copy c’tor
+    NoCopyClass1 copy1b = original1; // assigment operator
+
+    NoCopyClass2 original2;
+    NoCopyClass2 copy2a(original2); // copy c’tor
+    NoCopyClass2 copy2b = original2; // assigment operator
+
+    return 0;
+}
+```
+
+On compiling, we get the following error messages:
+
+```bash
+error: calling a private constructor of class 'NoCopyClass1'
+    NoCopyClass1 copy1(original1);
+    NoCopyClass1 copy1b = original1; 
+
+error: call to deleted constructor of 'NoCopyClass2'
+    NoCopyClass2 copy2(original2);
+    NoCopyClass2 copy2b = original2; 
+```
+
+**Both cases effectively prevent the original object from being copied or assigned**. In the C++11 standard library, there are some classes for multi-threaded synchronization which use the no copying policy.
+
+#### Policy 2: Exclusive ownership policy
+
+This policy states that **whenever a resource management object is copied, the resource handle is transferred from the source pointer to the destination pointer.** In the process, the **source pointer is set to `nullptr` to make ownership exclusive**. At any time, the resource handle belongs only to a single object, which is responsible for its deletion when it is no longer needed.
+
+The code example on the below illustrates the basic idea of exclusive ownership.
+
+```cpp
+#include <iostream>
+
+class ExclusiveCopy
+{
+private:
+    int *_myInt;
+
+public:
+    ExclusiveCopy()
+    {
+        _myInt = (int *)malloc(sizeof(int));
+        std::cout << "resource allocated" << std::endl;
+    }
+    ~ExclusiveCopy()
+    {
+        if (_myInt != nullptr)
+        {
+            free(_myInt);
+            std::cout << "resource freed" << std::endl;
+        }
+            
+    }
+    ExclusiveCopy(ExclusiveCopy &source)
+    {
+        _myInt = source._myInt;
+        source._myInt = nullptr;
+    }
+    ExclusiveCopy &operator=(ExclusiveCopy &source)
+    {
+        _myInt = source._myInt;
+        source._myInt = nullptr;
+        return *this;
+    }
+};
+
+int main()
+{
+    ExclusiveCopy source;
+    ExclusiveCopy destination(source);
+
+    return 0;
+}
+```
+
+The class `MyClass` overwrites both the copy consructor as well as the assignment operator. Inside, the handle to the resource `_myInt` is first **copied from the source** object and then **set to null so that only a single valid handle exists**. After copying, the **new object is responsible for properly deleting the memory resource on the heap**. The output of the program looks like the following:
+
+```
+resource allocated
+resource freed
+```
+
+As can be seen, **only a single resource is allocated and freed**. So **by passing handles and invalidating them**, we can **implement a basic version of an exclusive ownership policy**. **However, this example is not the way exclusive ownership is handled in the standard template library.** One problem in this implementation is that for a short time there are effectively two valid handles to the same resource - after the handle has been copied and before it is set to `nullptr`. **In concurrent programs, this would cause a data race** for the resource. 
+
+```cpp
+ExclusiveCopy(ExclusiveCopy &source) {
+    _myInt = source._myInt;      // two have same ownership in short time.
+    source._myInt = nullptr;     // invalid original pointer
+}
+```
+
+- between assign and invalid have time interval (although it's small)
+- both objects have valid handle in same time
+- in concurrent environment, it will cause data race
+
+**A much better alternative to handle exclusive ownership in C++ would be to use move semantics**, which we will discuss shortly in a very detailed lesson.
+
+
+
+#### Policy 3: Deep copying policy
+
+With this policy, copying and assigning class instances to each other is possible without the danger of resource conflicts. The idea is to allocate proprietary memory in the destination object and then to copy the content to which the source object handle is pointing into the newly allocated block of memory. This way, the content is preserved during copy or assignment. However, this approach increases the memory demands and the uniqueness of the data is lost: After the deep copy has been made, two versions of the same resource exist in memory.
+
+Let us look at an example in the code on the below.
+
+```cpp
+#include <iostream>
+
+class DeepCopy {
+ private:
+  int *_myInt;
+
+ public:
+  DeepCopy(int val) {
+    _myInt = (int *)malloc(sizeof(int));
+    *_myInt = val;
+    std::cout << "resource allocated at address " << _myInt << std::endl;
+  }
+  ~DeepCopy() {
+    free(_myInt);
+    std::cout << "resource freed at address " << _myInt << std::endl;
+  }
+  DeepCopy(DeepCopy &source) {
+    _myInt = (int *)malloc(sizeof(int));
+    *_myInt = *source._myInt;
+    std::cout << "resource allocated at address " << _myInt
+              << " with _myInt = " << *_myInt << std::endl;
+  }
+  DeepCopy &operator=(DeepCopy &source) {
+    _myInt = (int *)malloc(sizeof(int));
+    std::cout << "resource allocated at address " << _myInt
+              << " with _myInt=" << *_myInt << std::endl;
+    *_myInt = *source._myInt;
+    return *this;
+  }
+};
+
+int main() {
+  DeepCopy source(42);
+  DeepCopy dest1(source);
+  DeepCopy dest2 = dest1;
+
+  return 0;
+}
+
+```
+
+The deep-copy version of MyClass looks similar to the exclusive ownership policy: Both the assignment operator and the copy constructor have been overloaded with the source object passed by reference. **But instead of copying the source handle (and then deleting it), a proprietary block of memory is allocated on the heap and the content of the source is copied into it.**
+
+The output of the program looks like the following:
+
+```bash
+resource allocated at address 0x100300060
+resource allocated at address 0x100300070 with _myInt = 42
+resource allocated at address 0x100300080 with _myInt = 42
+resource freed at address 0x100300080
+resource freed at address 0x100300070
+resource freed at address 0x100300060
+```
+
+As can be seen, all copies have the same value of 42 while the address of the handle differs between `source`, `dest1` and `dest2`.
+
+To conclude, the following figure illustrates the idea of a deep copy:
+
+<img src="assets/C41-FIG2.png" style="zoom:50%;" />
+
+
+
+#### Policy 4: Shared ownership policy
+
+The last ownership policy we will be discussing in this course implements a shared ownership behavior. The idea is to perform a **copy or assignment similar to the default behavior,** i.e. **copying the handle instead of the content** (as with a shallow copy) while **at the same time keeping track of the number of instances** that also point to the same resource. Each time an instance goes out of scope, the counter is decremented. **Once the last object is about to be deleted, it can safely deallocate the memory resource**. We will see later in this course that this is the central idea of `unique_ptr`, which is a representative of the group of smart pointers.
+
+The example on the below illustrates the principle.
+
+```cpp
+#include <iostream>
+
+class SharedCopy
+{
+private:
+    int *_myInt;
+    static int _cnt;
+
+public:
+    SharedCopy(int val);
+    ~SharedCopy();
+    SharedCopy(SharedCopy &source);
+};
+
+int SharedCopy::_cnt = 0;
+
+SharedCopy::SharedCopy(int val)
+{
+    _myInt = (int *)malloc(sizeof(int));
+    *_myInt = val;
+    ++_cnt;
+    std::cout << "resource allocated at address " << _myInt << std::endl;
+}
+
+SharedCopy::~SharedCopy()
+{
+    --_cnt;
+    if (_cnt == 0)
+    {
+        free(_myInt);
+        std::cout << "resource freed at address " << _myInt << std::endl;
+    }
+    else
+    {
+        std::cout << "instance at address " << this << " goes out of scope with _cnt = " << _cnt << std::endl;
+    }
+}
+
+SharedCopy::SharedCopy(SharedCopy &source)
+{
+    _myInt = source._myInt;
+    ++_cnt;
+    std::cout << _cnt << " instances with handles to address " << _myInt << " with _myInt = " << *_myInt << std::endl;
+}
+
+int main()
+{
+    SharedCopy source(42);
+    SharedCopy destination1(source);
+    SharedCopy destination2(source);
+    SharedCopy destination3(source);
+
+    return 0;
+}
+```
+
+Note that class `MyClass` now has a **static member `_cnt`**, which is **incremented every time a new instance of `MyClass` is created and decrement once an instance is deleted.** On **deletion of the last instance, i.e. when `_cnt==0`, the block of memory to which the handle points is deallocated**.
+
+The output of the program is the following:
+
+```
+resource allocated at address 0x100300060
+2 instances with handles to address 0x100300060 with _myInt = 42
+3 instances with handles to address 0x100300060 with _myInt = 42
+4 instances with handles to address 0x100300060 with _myInt = 42
+instance at address 0x7ffeefbff6f8 goes out of scope with _cnt = 3
+instance at address 0x7ffeefbff700 goes out of scope with _cnt = 2
+instance at address 0x7ffeefbff718 goes out of scope with _cnt = 1
+resource freed at address 0x100300060
+```
+
+As can be seen, the memory is released only once as soon as the reference counter reaches zero.
+
+#### The Rule of Three
+
+In the previous examples we have taken a first look at several copying policies:
+
+1. Default copying
+2. No copying
+3. Exclusive ownership
+4. Deep copying
+5. Shared ownership
+
+In the first example we have seen that the default implementation of the copy constructor does not consider the "special" needs of a class which allocates and deallocates a shared resource on the heap. The problem with implicitly using the default copy constructor or assignment operator is that programmers are not forced to consider the implications for the memory management policy of their program. In the case of the first example, this leads to a segmentation fault and thus a program crash.
+
+In order to properly manage memory allocation, deallocation and copying behavior, we have seen that there is an intricate relationship between destructor, copy constructor and copy assignment operator. To this end, the **Rule of Three** states that if a class needs to have an overloaded copy constructor, copy assignment operator, ~~or~~ destructor, then it must also implement the other two as well to ensure that memory is managed consistently. As we have seen, the copy constructor and copy assignment operator (which are often almost identical) control how the resource gets copied between objects while the destructor manages the resource deletion.
+
+You may have noted that in the previous code example, the class `SharedCopy` does not implement the assignment operator. This is a violation of the **Rule of Three** and thus, if we were to use something like `destination3 = source` instead of `SharedCopy destination3(source)`, the counter variable would not be properly decremented.
+
+The copying policies discussed in this chapter are the basis for a powerful concept in C++11 - smart pointers. But before we discuss these, we need to go into further detail on move semantics, which is a prerequisite you need to learn more about so you can properly understand the exclusive ownership policy as well as the Rule of Five, both of which we will discuss very soon. But before we discuss move semantics, we need to look into the concept of `lvalues` and `rvalues` in the next section.
+
+
+
+#### Summary
+
+| Policy                          | Description                                                  | Pros                                                         | Cons                                                         |
+| ------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **No Copy Policy**              | Prevents objects from being copied by deleting copy constructor and assignment operator | • Prevents unintended copies<br>• Clear ownership semantics<br>• Memory safe<br>• Good for unique resources | • Limited object transferability<br>• Can be restrictive in some designs<br>• May require alternative transfer mechanisms |
+| **Exclusive Ownership**         | Only one object can own a resource at a time; transfers ownership on copy/assignment | • Clear ownership model<br>• Prevents dangling pointers<br>• Efficient resource management<br>• No memory leaks | • Can be complex to implement correctly<br>• Requires careful transfer handling<br>• May need additional synchronization in multi-threaded environments |
+| **Deep Copy**                   | Creates complete independent copies of resources             | • Complete data independence<br>• Safe for concurrent modification<br>• No sharing complications<br>• Simple to reason about | • Higher memory usage<br>• Performance overhead for large objects<br>• May be unnecessary for immutable data<br>• Expensive for large resources |
+| **Shared Ownership**            | Multiple objects can share a resource with reference counting | • Flexible resource sharing<br>• Automatic cleanup<br>• Good for complex object relationships<br>• Natural for shared resources | • Overhead of reference counting<br>• Potential circular references<br>• Thread synchronization overhead<br>• Memory fragmentation |
+| **Default Copy** (Shallow Copy) | Default C++ behavior, copies pointers/references             | • Simple implementation<br>• Fast copying<br>• Low memory overhead<br>• Good for trivial types | • Dangerous for managed resources<br>• Can lead to double deletion<br>• Potential dangling pointers<br>• Hard to track ownership |
+
+##### Common Use Cases
+| Policy    | Best Used When                                               |
+| --------- | ------------------------------------------------------------ |
+| No Copy   | • Singleton objects<br>• System resources<br>• Thread objects |
+| Exclusive | • File handles<br>• Database connections<br>• Unique resources |
+| Deep Copy | • Complex data structures<br>• Independent object copies needed<br>• Thread-safe requirements |
+| Shared    | • Caches<br>• Shared configurations<br>• Resource pools      |
+| Default   | • POD types<br>• Immutable data<br>• Temporary objects       |
+
+##### Modern C++ Equivalents
+| Policy    | Modern C++ Implementation                    |
+| --------- | -------------------------------------------- |
+| No Copy   | `= delete`                                   |
+| Exclusive | `std::unique_ptr`                            |
+| Deep Copy | Custom implementation with copy constructors |
+| Shared    | `std::shared_ptr`                            |
+| Default   | `struct`/`class` default behavior            |
+
+##### Thread Safety Considerations
+| Policy    | Thread Safety Level                                        |
+| --------- | ---------------------------------------------------------- |
+| No Copy   | Inherently thread-safe for copying                         |
+| Exclusive | Thread-safe for ownership transfer if properly implemented |
+| Deep Copy | Thread-safe after copy completion                          |
+| Shared    | Needs atomic reference counting                            |
+| Default   | Not thread-safe                                            |
+
+
+
+### Lvalues and Rvalues
+
+The understanding of lvalues and rvalues in C++ is often superficial among programmers, and this understanding becomes even more vague when discussing lvalue and rvalue references. **However, these concepts are fundamental to modern C++ programming, offering ways to make code more robust, intentional, and efficient**. Lvalues and rvalues provide crucial information about an **object's lifecycle in memory and its ownership policy**. While programmers implicitly use lvalues and lvalue references regularly, **rvalue references** (identified by **double ampersands**(&)) represent a newer concept that allows **access to temporary objects** that would otherwise be quickly deleted. Although rvalue references might seem intimidating initially, they are **essential for efficient C++ programming** and **are extensively used under the hood in STL container classes** along with move semantics. Understanding these concepts opens up new possibilities in modern C++ development.
+
+
+
+#### What are lvalues and rvalues?
+
+A good grasp of **lvalues and rvalues** in C++ is essential for understanding the more advanced concepts of **rvalue references** and **motion semantics.**
+
+Let us start by stating that every expression in C++ has a type and belongs to a value category. When objects are created, copied or moved during the evaluation of an expression, the compiler uses these value expressions to decide which method to call or which operator to use.
+
+Prior to C++11, there were only two value categories, now there are as many as five of them:
+
+<img src="assets/C42-FIG1.png" style="zoom:50%;" />
+
+To keep it short, we do not want to go into all categories, but limit ourselves to **lvalues** and **prvalues**:
+
+- **Lvalues** have an address that can be accessed. They are expressions whose evaluation by the compiler determines the identity of objects or functions.
+- **Prvalues** do not have an address that is accessible directly. They are temporary expressions used to initialize objects or compute the value of the operand of an operator.
+
+For the sake of simplicity and for compliance with many tutorials, videos and books about the topic, let us refer to *prvalues* as *rvalues* from here on.
+
+The two characters `l` and `r` are originally derived from the perspective of the assignment operator `=`, which always expects a rvalue on the right, and which it assigns to a lvalue on the left. In this case, the `l` stands for left and `r` for right:
+
+```
+int i = 42;  // lvalue = rvalue;
+```
+
+With many other operators, however, this right-left view is not entirely correct. In more general terms, an lvalue is an entity that points to a specific memory location. An rvalue is usually a short-lived object, which is only needed in a narrow local scope. To simplify things a little, one could think of lvalues as *named containers* for rvalues.
+
+In the example above, the value `42` is an rvalue. It does not have a specific memory address which we know about. The rvalue is assigned to a variable `i` with a specific memory location known to us, which is what makes it an lvalue in this example.
+
+Using the address operator `&` we can generate an lvalue from an rvalue and assign it to another lvalue:
+
+```
+int *j = &i;
+```
+
+In this small example, the expression `&i` generates the address of `i` as an rvalue and assigns it to `j`, which is an lvalue now holding the memory location of `i`.
+
+The code on the below illustrates several examples of lvalues and rvalues:
+
+```cpp
+int main()
+{
+    // initialize some variables on the stack
+    int i, j, *p;
+
+    // correct usage of lvalues and rvalues
+    
+    i = 42; // i is an lvalue and 42 is an rvalue
+    
+    p = new int;
+    *p = i; // the dereferenced pointer is an lvalue
+    delete p; 
+    
+    ((i < 42) ? i : j) = 23; // the conditional operator returns an lvalue (eiter i or j)
+
+    // incorrect usage of lvalues and rvalues
+    //42 = i; // error : the left operand must be an lvalue
+    //j * 42 = 23; // error : the left operand must be an lvalue
+
+    return 0; 
+}
+```
+
+#### Lvalue references
+
+An lvalue reference can be considered as an **alternative name for an object**. It is **a reference** that **binds to an lvalue** and is **declared using** an optional list of specifiers (which we will not further discuss here) followed by the reference declarator **`&`.** The short code sample on the below declares an integer `i` and a reference `j` which can be used as an alias for the existing object.
+
+```cpp
+#include <iostream>
+
+int main()
+{
+    int i = 1; 
+    int &j = i; 
+    ++i;
+    ++j;
+
+    std::cout << "i = " << i << ", j = " << j << std::endl;
+
+    return 0;
+}
+```
+
+The output of the program is `i = 3, j = 3`
+
+We can see that the lvalue reference `j` can be used just as `i` can. A change to either `i` or `j` will affect the same memory location on the stack.
+
+**One of the primary use-cases for lvalue references** is the **pass-by-reference** semantics in function calls as in the example on the below.
+
+```cpp
+#include <iostream>
+
+void myFunction(int &val) // int & val = i
+{
+    ++val;
+}
+
+int main()
+{
+    int i = 1; 
+    myFunction(i);
+
+    std::cout << "i = " << i << std::endl;
+
+    return 0;
+}
+```
+
+The function `myFunction` has an lvalue reference as a parameter, which establishes an alias to the integer `i` which is passed to it in `main`.
+
+#### Rvalue references
+
+You already know that an rvalue is a temporary expression which is - among other use-cases, a means of initializing objects. In the call `int i = 42`, 42 is the rvalue.
+
+Let us consider an example similar to the last one, shown on the below.
+
+```cpp
+#include <iostream>
+
+void myFunction(int &val)
+{
+    std::cout << "val = " << val << std::endl;
+}
+
+int main()
+{
+    int j = 42;
+    myFunction(j);
+
+    myFunction(42);
+
+    int k = 23; 
+    myFunction(j+k);
+
+    return 0; 
+}
+```
+
+As before, the function `myFunction` takes an lvalue reference as its argument. In `main`, the call `myFunction(j)` works just fine while `myFunction(42)` as well as `myFunction(j+k)` produces the following compiler error on Mac:
+
+```
+candidate function not viable: expects an l-value for 1st argument
+```
+
+and the following error in the workspace with g++:
+
+```
+error: cannot bind non-const lvalue reference of type ‘int&’ to an rvalue of type ‘int’
+```
+
+While the number `42` is obviously an rvalue, with `j+k` things might not be so obvious, as `j` and `k` are variables and thus lvalues. To compute the result of the addition, the compiler has to create a temporary object to place it in - and this object is an rvalue.
+
+Since C++11, there is a new type available called ***rvalue reference***, which can be identified from the double ampersand `&&` after a type name. With this operator, it is possible to store and even modify an rvalue, i.e. a temporary object which would otherwise be lost quickly.
+
+But what do we need this for? Before we look into the answer to this question, let us consider the example on the below.
+
+```cpp
+#include <iostream>
+
+int main()
+{
+    int i = 1; 
+    int j = 2; 
+    int k = i + j; 
+    int &&l = i + j; 
+
+    std::cout << "k = " << k << ", l = " << l << std::endl;
+
+    return 0; 
+}
+```
+
+After creating the integers `i` and `j` on the stack, the sum of both is added to a third integer `k`. Let us examine this simple example a little more closely. In the first and second assignment, `i` and `j` are created as lvalues, while `1` and `2` are rvalues, whose value is copied into the memory location of `i` and `j`. Then, a third lvalue, `k`, is created. The sum `i+j` is created as an rvalue, which holds the result of the addition before being copied into the memory location of `k`. **This is quite a lot of copying and holding of temporary values in memory. With an rvalue reference, this can be done more efficiently.**
+
+**The expression `int &&l` creates an rvalue reference, to which the address of the temporary object is assigned, that holds the result of the addition.** So instead of first creating the rvalue `i+j` , then copying it and finally deleting it, we can now hold the temporary object in memory. This is much more efficient than the first approach, even though saving a few bytes of storage in the example might not seem like much at first glance. One of the most important aspects of rvalue references is that they pave the way for *move semantics*, which is a mighty technique in modern C++ to optimize memory usage and processing speed. Move semantics and rvalue references make it possible to write code that transfers resources such as dynamically allocated memory from one object to another in a very efficient manner and also supports the concept of exclusive ownership, as we will shortly see when discussing
+
+#### Summary
+
+This section introduces key concepts, building on your familiarity with **l-values, r-values, and l-value references**, which you’ve used many times before. However, **r-value references** might still feel unfamiliar. Their usefulness lies in optimizing operations, such as saving copy operations by directly capturing temporary results like the outcome of an addition. In the next section, the focus will shift to one of the primary applications of r-value references: **move semantics.**
+
+#### External Resources
+
+Here are some good resources to learn more about Lvalues and Rvalues:
+
+- [How to crack the confusing world of lvalues and rvalues in C++? It is easy!(opens in a new tab)](https://medium.com/@dhaneshvb/how-to-crack-the-confusing-world-of-lvalues-and-rvalues-in-c-it-is-easy-61c32ced51ce)
+- [Lvalues and Rvalues (C++)](https://docs.microsoft.com/en-us/cpp/cpp/lvalues-and-rvalues-visual-cpp?view=msvc-160)
+
+
+
+### Move Semantics
+
+This section focuses on **move semantics**, including the **move constructor** and **move assignment operator**, which, along with the **destructor**, **copy constructor**, and **copy assignment operator**, form the **rule of five**. Move semantics **not only optimize** operations **by saving copies** but also **allow for transferring object ownership** between scopes. Introduced in C++11, this key innovation is essential for STL container classes like vectors and forms the foundation of smart pointers, which will be covered next. Additionally, **move semantics play a critical role in concurrency**, enabling efficient management of **exclusive ownership** in multithreaded applications.
+
+#### Rvalue references and std::move
+
+In order to fully understand the concept of smart pointers in the next lesson, we first need to take a look at a powerful concept introduced with C++11 called *move semantics*.
+
+The last section on lvalues, rvalues and especially rvalue references is an important prerequisite for understanding the concept of moving data structures.
+
+Let us consider the function on the below which takes an rvalue reference as its parameter.
+
+```cpp
+#include <iostream>
+
+void myFunction(int &&val)
+{
+    std::cout << "val = " << val << std::endl;
+}
+
+int main()
+{
+    myFunction(42);
+
+    return 0; 
+}
+```
+
+The important message of the function argument of `myFunction` to the programmer is : The object that binds to the rvalue reference `&&val` is yours, it is not needed anymore within the scope of the caller (which is `main`). As discussed in the previous section on rvalue references, this is interesting from two perspectives:
+
+1. Passing values like this **improves performance** as no temporary copy needs to be made anymore and
+2. **ownership changes**, since the object the reference binds to has been abandoned by the caller and now binds to a handle which is available only to the receiver. This could not have been achieved with lvalue references as any change to the object that binds to the lvalue reference would also be visible on the caller side.
+
+There is one more important aspect we need to consider: ***rvalue references are themselves lvalues**.* While this might seem confusing at first glance, it really is the mechanism that enables move semantics: **A reference is always defined in a certain context (such as in the above example the variable `val`)** . Even though the object it refers to (the number `42`) may be disposable in the context it has been created (the `main` function), it is not disposable in the context of the reference . So within the scope of `myFunction`, `val` is an **lvalue as it gives access to the memory location** where the number 42 is stored.
+
+Note however that in the above code example we cannot pass an lvalue to `myFunction`, because an rvalue reference cannot bind to an lvalue. The code
+
+```cpp
+int i = 23;
+myFunction(i)
+```
+
+would result in a compiler error. There is a solution to this problem though: The function `std::move` converts an lvalue into an rvalue (actually, to be exact, into an *xvalue*, which we will not discuss here for the sake of clarity), which makes it possible to use the lvalue as an argument for the function:
+
+```cpp
+int i = 23; 
+myFunction(std::move(i));
+```
+
+In doing this, we state that in the scope of `main` we will not use i anymore, which now exists only in the scope of `myFunction`. Using `std::move` in this way is one of the components of move semantics, which we will look into shortly. But first let us consider an example of the **Rule of Three**.
+
+#### The Rule of Three in action
+
+Let us consider the example to the below of a class which manages a block of dynamic memory and incrementally add new functionality to it. 
+
+```cpp
+#include <stdlib.h>
+#include <iostream>
+
+class MyMovableClass
+{
+private:
+    int _size;
+    int *_data;
+
+public:
+    MyMovableClass(size_t size) // constructor
+    {
+        _size = size;
+        _data = new int[_size];
+        std::cout << "CREATING instance of MyMovableClass at " << this << " allocated with size = " << _size*sizeof(int)  << " bytes" << std::endl;
+    }
+
+    ~MyMovableClass() // 1 : destructor
+    {
+        std::cout << "DELETING instance of MyMovableClass at " << this << std::endl;
+        delete[] _data;
+    }
+};
+```
+
+In this class, a block of heap memory is allocated in the **constructor** and deallocated in the destructor. As we have discussed before, when either **destructor, copy constructor or copy assignment operator** are defined, it is good practice to also define the other two (known as the **Rule of Three**). While the compiler would generate default versions of the missing components, these would not properly reflect the memory management strategy of our class, so leaving out the manual implementation is usually not advised.
+
+So let us start with the copy constructor of `MyMovableClass`, which could look like the following:
+
+```cpp
+    MyMovableClass(const MyMovableClass &source) // 2 : copy constructor
+    {
+        _size = source._size;
+        _data = new int[_size];
+        *_data = *source._data;
+        std::cout << "COPYING content of instance " << &source << " to instance " << this << std::endl;
+    }
+```
+
+Similar to an example in the section on copy semantics, the copy constructor takes an **lvalue reference** to the **source instance**, allocates a block of memory of the same size as in the source and then copies the data into its members (as a deep copy).
+
+Next, let us take a look at the **copy assignment operator**:
+
+```cpp
+    MyMovableClass &operator=(const MyMovableClass &source) // 3 : copy assignment operator
+    {
+        std::cout << "ASSIGNING content of instance " << &source << " to instance " << this << std::endl;
+        if (this == &source)
+            return *this;
+        delete[] _data;
+        _data = new int[source._size];
+        *_data = *source._data;
+        _size = source._size;
+        return *this;
+    }
+```
+
+The **if-statement at the top of the above implementation protects against self-assignment and is standard boilerplate code for the user-defined assignment operator.** The remainder of the code is more or less identical to the copy constructor, apart from returning a reference to the own instance using `this`.
+
+After add this code to the `rule_of_three.cpp` file as below.
+
+```cpp
+#include <stdlib.h>
+
+#include <iostream>
+
+class MyMovableClass {
+ private:
+  int _size;
+  int* _data;
+
+ public:
+  MyMovableClass(size_t size) {  // constructor
+    _size = size;
+    _data = new int[_size];
+    std::cout << "CREATING instance of MyMovableClass at " << this
+              << " allocated with size = " << _size * sizeof(int) << " bytes"
+              << std::endl;
+  }
+
+  ~MyMovableClass() {  // 1 : destructor
+    std::cout << "DELETING instance of MyMovableClass at " << this << std::endl;
+    delete[] _data;
+  }
+
+  MyMovableClass(const MyMovableClass& source)  // 2 : copy constructor
+  {
+    _size = source._size;
+    _data = new int[_size];
+    *_data = *source._data;
+    std::cout << "COPYING content of instance " << &source << " to instance "
+              << this << std::endl;
+  }
+
+  MyMovableClass& operator=(
+      const MyMovableClass& source)  // 3 : copy assignment operator
+  {
+    std::cout << "ASSIGNING content of instance " << &source << " to instance "
+              << this << std::endl;
+    if (this == &source) return *this;
+    delete[] _data;
+    _data = new int[source._size];
+    *_data = *source._data;
+    _size = source._size;
+    return *this;
+  }
+};
+```
+
+You might have noticed that both copy constructor and assignment operator take a `const` reference to the source
