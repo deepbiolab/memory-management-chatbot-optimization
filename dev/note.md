@@ -1682,7 +1682,7 @@ MyClass *object = new (memory) MyClass;
 
 ![image-20241214214244051](assets/image-20241214214244051.png)
 
-The syntax `new (memory)` is denoted as *placement new*. The difference to the "conventional" `new` we have been using so far is that that **no memory is allocated**. The **call constructs an object and places it in the assigned memory location**. There is however, **no `delete` equivalent to `placement new`, so we have to call the destructor explicitly** in this case instead of using `delete` as we would have done with a regular call to `new`:
+**The syntax `new (memory)` is denoted as *placement new***. The difference to the "conventional" `new` we have been using so far is that that **no memory is allocated**. The **call constructs an object and places it in the assigned memory location**. There is however, **no `delete` equivalent to `placement new`, so we have to call the destructor explicitly** in this case instead of using `delete` as we would have done with a regular call to `new`:
 
 ```
 object->~MyClass();
