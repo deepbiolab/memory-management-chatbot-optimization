@@ -3744,7 +3744,7 @@ Note that there are **no options for converting away from a shared pointer**. On
 
 #### When to use raw pointers and smart pointers?
 
-As a general rule of thumb with modern C++, smart pointers should be used often. They will make your code safer as you no longer need to think (much) about the proper allocation and deallocation of memory. As a consequence, there will be much fewer memory leaks caused by dangling pointers or crashes from accessing invalidated memory blocks.
+As a general rule of thumb with modern C++, **smart pointers should be used often**. They will make your code safer as you no longer need to think (much) about the proper allocation and deallocation of memory. As a consequence, there will be **much fewer memory leaks** caused by dangling pointers or crashes from accessing invalidated memory blocks.
 
 When using raw pointers on the other hand, your code might be susceptible to the following bugs:
 
@@ -3754,9 +3754,9 @@ When using raw pointers on the other hand, your code might be susceptible to the
 4. Using memory that has not yet been allocated
 5. Thinking that memory is still allocated after being freed
 
-With all the advantages of smart pointers in modern C++, one could easily assume that it would be best to completely ban the use of new and delete from your code. However, while this is in many cases possible, it is not always advisable as well. Let us take a look at the [C++ core guidelines](http://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#main), which has several [**rules for explicit memory allocation and deallocation**](http://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#r-resource-management). In the scope of this course, we will briefly discuss three of them:
+With all the advantages of smart pointers in modern C++, one could easily assume that it would be best to **completely ban the use of new and delete from your code**. However, while this is in many cases possible, it is not always advisable as well. Let us take a look at the [C++ core guidelines](http://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#main), which has several [**rules for explicit memory allocation and deallocation**](http://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#r-resource-management). In the scope of this course, we will briefly discuss three of them:
 
-1. **R. 10: Avoid malloc and free** While the calls `(MyClass*)malloc( sizeof(MyClass) )` and `new MyClass` both allocate a block of memory on the heap in a perfectly valid manner, only `new` will also call the constructor of the class and `free` the destructor. To reduce the risk of undefined behavior, `malloc` and `free` should thus be avoided.
+1. **R. 10: Avoid malloc and free** While the calls `(MyClass*)malloc( sizeof(MyClass) )` and `new MyClass` both allocate a block of memory on the heap in a perfectly valid manner, only `new` will **also call the constructor** of the class and `free` the **destructor**. To reduce the risk of undefined behavior, `malloc` and `free` should thus be avoided.
 2. **R. 11: Avoid calling new and delete explicitly** Programmers have to make sure that every call of `new` is paired with the appropriate `delete` at the correct position so that no memory leak or invalid memory access occur. The emphasis here lies in the word "explicitly" as opposed to implicitly, such as with smart pointers or containers in the standard template library.
 3. **R. 12: Immediately give the result of an explicit resource allocation to a manager object** It is recommended to make use of manager objects for controlling resources such as files, memory or network connections to mitigate the risk of memory leaks. This is the core idea of smart pointers as discussed at length in this section.
 
@@ -3764,3 +3764,48 @@ Summarizing, raw pointers created with `new` and `delete` allow for a high degre
 
 - A call to `new` should not be located too far away from the corresponding `delete`. It is bad style to stretch you `new` / `delete` pairs throughout your program with references criss-crossing your entire code.
 - Calls to `new` and `delete` should always be hidden from third parties so that they must not concern themselves with managing memory manually (which is similar to R. 12).****
+
+
+
+In addition to the above recommendations, the C++ core guidelines also contain a total of 13 rules for the [**recommended use of smart pointers**](http://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#rsmart-smart-pointers). In the following, we will discuss a selection of these:
+
+1. **R. 20 : Use unique_ptr or shared_ptr to represent ownership**
+2. **R. 21 : Prefer unique_ptr over std::shared_ptr unless you need to share ownership**
+
+Both pointer types express ownership and responsibilities (R. 20). A `unique_ptr` is an exclusive owner of the managed resource; therefore, it cannot be copied, only moved. In contrast, a `shared_ptr` shares the managed resource with others. As described above, this mechanism works by incrementing and decrementing a common reference counter. The resulting administration overhead makes `shared_ptr` more expensive than `unique_ptr`. For this reason `unique_ptr` should always be the first choice (R. 21).
+
+1. **R. 22 : Use make_shared() to make shared_ptr**
+2. **R. 23 : Use make_unique() to make std::unique_ptr**
+
+The increased management overhead compared to raw pointers becomes in particular true if a `shared_ptr` is used. Creating a `shared_ptr` requires (1) the allocation of the resource using new and (2) the allocation and management of the reference counter. Using the factory function `make_shared` is a one-step operation with lower overhead and should thus always be preferred. (R.22). This also holds for `unique_ptr` (R.23), although the performance gain in this case is minimal (if existent at all).
+
+But there is an additional reason for using the `make_...` factory functions: Creating a smart pointer in a single step removes the risk of a memory leak. Imagine a scenario where an exception happens in the constructor of the resource. In such a case, the object would not be handled properly and its destructor would never be called - even if the managing object goes out of scope. Therefore, `make_shared` and `make_unique` should always be preferred. Note that `make_unique` is only available with compilers that support at least the C++14 standard.
+
+1. **R. 24 : Use weak_ptr to break cycles of shared_ptr**
+
+We have seen that weak pointers provide a way to break a deadlock caused by two owning references which are cyclicly referring to each other. With weak pointers, a resource can be safely deallocated as the reference counter is not increased.
+
+The remaining set of guideline rules referring to smart pointers are mostly concerning the question of how to pass a smart pointer to a function. We will discuss this question in the next concept.
+
+
+
+#### Summary
+
+Here’s a concise summary of the three main smart pointers in C++ (`std::unique_ptr`, `std::shared_ptr`, and `std::weak_ptr`) using a markdown table format:
+
+- Smart Pointer Comparison Table
+
+| **Smart Pointer**     | **Key Features**                                             | **Use Cases**                                                | **AI Applications**                                          |
+| --------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **`std::unique_ptr`** | - Exclusive ownership (non-copyable, only movable) <br> - Lightweight and efficient <br> - Automatically deletes the resource when out of scope | - Managing single objects or resources with a clear ownership <br> - Avoiding manual `delete` calls | - Managing individual models or layers in a neural network <br> - Handling temporary resources like configurations |
+| **`std::shared_ptr`** | - Shared ownership (reference counting) <br> - Automatically deletes the resource when the last reference is destroyed | - Sharing resources across multiple owners <br> - Managing shared datasets or parameters in distributed systems | - Sharing training datasets across multiple models <br> - Managing shared weights in ensemble learning |
+| **`std::weak_ptr`**   | - Non-owning reference to a `std::shared_ptr` <br> - Avoids cyclic dependencies that cause memory leaks | - Observing shared resources without affecting their lifetime <br> - Breaking reference cycles in graphs or trees | - Observing shared datasets without ownership in multi-threaded training <br> - Preventing cyclic dependencies in computation graphs |
+
+Notes:
+
+1. **`std::unique_ptr`** is ideal for situations where you need exclusive ownership and minimal overhead.
+2. **`std::shared_ptr`** is useful when multiple components need access to the same resource and shared ownership is required.
+3. **`std::weak_ptr`** is complementary to `std::shared_ptr`, designed to avoid cyclic dependencies in complex ownership hierarchies.
+
+
+
