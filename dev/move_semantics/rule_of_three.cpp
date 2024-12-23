@@ -5,11 +5,18 @@
 class MyMovableClass {
  private:
   int _size;
+<<<<<<< HEAD
+  int* _data;
+
+ public:
+  MyMovableClass(size_t size) {  // constructor
+=======
   int *_data;
 
  public:
   MyMovableClass(size_t size)  // constructor
   {
+>>>>>>> 7f29e547e19f9a2d1d37e9bdf49cebf1134bf5db
     _size = size;
     _data = new int[_size];
     std::cout << "CREATING instance of MyMovableClass at " << this
@@ -17,13 +24,21 @@ class MyMovableClass {
               << std::endl;
   }
 
+<<<<<<< HEAD
+  ~MyMovableClass() {  // 1 : destructor
+=======
   ~MyMovableClass()  // 1 : destructor
   {
+>>>>>>> 7f29e547e19f9a2d1d37e9bdf49cebf1134bf5db
     std::cout << "DELETING instance of MyMovableClass at " << this << std::endl;
     delete[] _data;
   }
 
+<<<<<<< HEAD
+  MyMovableClass(const MyMovableClass& source)  // 2 : copy constructor
+=======
   MyMovableClass(const MyMovableClass &source)  // 2 : copy constructor
+>>>>>>> 7f29e547e19f9a2d1d37e9bdf49cebf1134bf5db
   {
     _size = source._size;
     _data = new int[_size];
@@ -31,8 +46,14 @@ class MyMovableClass {
     std::cout << "COPYING content of instance " << &source << " to instance "
               << this << std::endl;
   }
+<<<<<<< HEAD
+
+  MyMovableClass& operator=(
+      const MyMovableClass& source)  // 3 : copy assignment operator
+=======
   MyMovableClass &operator=(
       const MyMovableClass &source)  // 3 : copy assignment operator
+>>>>>>> 7f29e547e19f9a2d1d37e9bdf49cebf1134bf5db
   {
     std::cout << "ASSIGNING content of instance " << &source << " to instance "
               << this << std::endl;
@@ -43,6 +64,9 @@ class MyMovableClass {
     _size = source._size;
     return *this;
   }
+<<<<<<< HEAD
+};
+=======
 };
 
 MyMovableClass createObject(int size) {
@@ -66,3 +90,4 @@ int main() {
 
   return 0;
 }
+>>>>>>> 7f29e547e19f9a2d1d37e9bdf49cebf1134bf5db
