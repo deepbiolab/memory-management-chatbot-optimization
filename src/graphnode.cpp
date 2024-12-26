@@ -11,7 +11,7 @@ GraphNode::~GraphNode()
     //// STUDENT CODE
     ////
 
-    delete _chatBot; 
+    // Do not delete _chatBot here, otherwise it cause double free.
 
     ////
     //// EOF STUDENT CODE
