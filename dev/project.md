@@ -282,7 +282,7 @@ The progression of tasks builds upon each other, starting from basic memory mana
 
 ​                   
 
-## Task Details
+
 
 
 
